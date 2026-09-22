@@ -1,1 +1,3 @@
-package D7024e
+module d7024e
+
+go 1.22

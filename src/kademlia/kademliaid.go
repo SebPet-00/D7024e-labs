@@ -2,6 +2,7 @@ package kademlia
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 )
 
@@ -11,16 +12,22 @@ const IDLength = 32 // 256 bit / 8 bits/byte = 32 bytes
 // type definition of a KademliaID
 type KademliaID [IDLength]byte
 
-// NewKademliaID returns a new instance of a KademliaID based on the string input
-func NewKademliaID(data string) *KademliaID {
-	decoded, _ := hex.DecodeString(data)
+// NewKademliaID parses an ID from exactly 64 hexadecimal characters.
+func NewKademliaID(data string) (*KademliaID, error) {
+	if len(data) != IDLength*2 {
+		return nil, fmt.Errorf("Kademlia ID must contain %d hexadecimal characters", IDLength*2)
+	}
+	decoded, err := hex.DecodeString(data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Kademlia ID: %w", err)
+	}
 
 	newKademliaID := KademliaID{}
 	for i := 0; i < IDLength; i++ {
 		newKademliaID[i] = decoded[i]
 	}
 
-	return &newKademliaID
+	return &newKademliaID, nil
 }
 
 // NewRandomKademliaID returns a new instance of a random KademliaID,
