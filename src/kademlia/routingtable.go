@@ -1,8 +1,5 @@
 package kademlia
 
-const bucketSize = 20
-
-
 // RoutingTable definition
 // keeps a refrence contact of me and an array of buckets
 type RoutingTable struct {
@@ -12,9 +9,15 @@ type RoutingTable struct {
 
 // NewRoutingTable returns a new instance of a RoutingTable
 func NewRoutingTable(me Contact) *RoutingTable {
+	return newRoutingTable(me, defaultK)
+}
+
+// newRoutingTable uses the node's validated bucket capacity.
+func newRoutingTable(me Contact, capacity int) *RoutingTable {
 	routingTable := &RoutingTable{}
 	for i := 0; i < IDLength*8; i++ {
 		routingTable.buckets[i] = newBucket()
+		routingTable.buckets[i].capacity = capacity
 	}
 	routingTable.me = me
 	return routingTable
