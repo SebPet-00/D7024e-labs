@@ -20,7 +20,7 @@ func TestNewKademlia(t *testing.T) {
 	if !node.me.ID.Equals(&want) || node.me.Address != "127.0.0.1:8000" {
 		t.Fatal("node identity does not match SHA-256(IP:port)")
 	}
-	if node.routingTable == nil || node.dataStore == nil || node.network == nil {
+	if node.routingTable == nil || node.dataStore == nil {
 		t.Fatal("node state was not initialized")
 	}
 	if len(node.routingTable.FindClosestContacts(&want, config.K)) != 0 {

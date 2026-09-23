@@ -3,7 +3,6 @@ package kademlia
 import (
 	"crypto/sha256"
 	"fmt"
-	"net/netip"
 	"sync"
 )
 
@@ -13,7 +12,7 @@ type Kademlia struct {
 	me           Contact
 	config       Config
 	routingTable *RoutingTable
-	network      *Network // Replaced by a transport interface in the network step.
+	network      Transport // Nil until a transport is supplied.
 
 	dataMu    sync.RWMutex // Protects dataStore when storage is implemented.
 	dataStore map[KademliaID][]byte
@@ -29,15 +28,10 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	endpoint, err := netip.ParseAddrPort(address)
+	address, err := canonicalAddress(address)
 	if err != nil {
-		return nil, fmt.Errorf("invalid node address: %w", err)
+		return nil, err
 	}
-	ip := endpoint.Addr().Unmap()
-	if endpoint.Port() == 0 || ip.IsUnspecified() || ip.IsMulticast() || ip.Zone() != "" {
-		return nil, fmt.Errorf("node address must have a concrete unicast IP and a nonzero port without a zone")
-	}
-	address = netip.AddrPortFrom(ip, endpoint.Port()).String()
 	id := KademliaID(sha256.Sum256([]byte(address)))
 	me := NewContact(&id, address)
 
@@ -45,10 +39,24 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 		me:           me,
 		config:       config,
 		routingTable: newRoutingTable(me, config.K),
-		network:      &Network{},
 		dataStore:    make(map[KademliaID][]byte),
 		done:         make(chan struct{}),
 	}, nil
+}
+
+// NewKademliaWithTransport initializes a node using an already bound transport.
+// Ownership transfers to the node on success: Close will close the transport.
+// On error, the caller still owns the transport and must close it.
+func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, error) {
+	if transport == nil {
+		return nil, fmt.Errorf("transport must not be nil")
+	}
+	node, err := NewKademlia(transport.LocalAddr(), config)
+	if err != nil {
+		return nil, err
+	}
+	node.network = transport
+	return node, nil
 }
 
 // Contact returns the node's address and a copy of its ID.
@@ -58,10 +66,13 @@ func (kademlia *Kademlia) Contact() Contact {
 }
 
 // Close signals shutdown. It is safe to call more than once or concurrently.
-// Future background workers will observe done; there are none yet. 
+// It also closes the transport to unblock any pending receive.
 func (kademlia *Kademlia) Close() {
 	kademlia.closeOnce.Do(func() {
 		close(kademlia.done)
+		if kademlia.network != nil {
+			_ = kademlia.network.Close()
+		}
 	})
 }
 
