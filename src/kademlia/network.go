@@ -37,15 +37,17 @@ type pendingRPC struct {
 // Network implements RPC independently of how packets are delivered.
 // One receiver dispatches requests and matches replies to pending calls.
 type Network struct {
-	routingTable *RoutingTable
-	transport    Transport
-	me           Contact
-	config       Config
-	mu           sync.Mutex
-	pending      map[string]*pendingRPC
-	done         chan struct{}
-	stopped      chan struct{}
-	closeOnce    sync.Once
+	evictions        chan *evictionProbe
+	evictionsStopped chan struct{}
+	routingTable     *RoutingTable
+	transport        Transport
+	me               Contact
+	config           Config
+	mu               sync.Mutex
+	pending          map[string]*pendingRPC
+	done             chan struct{}
+	stopped          chan struct{}
+	closeOnce        sync.Once
 }
 
 // NewNetwork takes ownership of transport on success and starts the RPC reader.
@@ -72,14 +74,17 @@ func newNetwork(transport Transport, config Config, table *RoutingTable) (*Netwo
 		table = newRoutingTable(NewContact(&id, address), config.K)
 	}
 	network := &Network{
-		routingTable: table,
-		transport:    transport,
-		me:           NewContact(&id, address),
-		config:       config,
-		pending:      make(map[string]*pendingRPC),
-		done:         make(chan struct{}),
-		stopped:      make(chan struct{}),
+		evictions:        make(chan *evictionProbe, IDLength*8),
+		evictionsStopped: make(chan struct{}),
+		routingTable:     table,
+		transport:        transport,
+		me:               NewContact(&id, address),
+		config:           config,
+		pending:          make(map[string]*pendingRPC),
+		done:             make(chan struct{}),
+		stopped:          make(chan struct{}),
 	}
+	go network.evictionLoop()
 	go network.receiveLoop()
 	return network, nil
 }
@@ -114,6 +119,7 @@ func (network *Network) call(ctx context.Context, contact *Contact, method strin
 		return rpcMessage{}, fmt.Errorf("contact ID does not match its address")
 	}
 	pending := &pendingRPC{address: address, id: expectedID, method: method, response: make(chan rpcMessage, 1)}
+	version := network.routingTable.contactVersion(&expectedID)
 	requestID, err := network.register(pending)
 	if err != nil {
 		return rpcMessage{}, err
@@ -153,6 +159,7 @@ func (network *Network) call(ctx context.Context, contact *Contact, method strin
 			return rpcMessage{}, net.ErrClosed
 		case <-timer.C:
 			if attempt == network.config.RPCRetries {
+				network.routingTable.removeUnresponsive(&expectedID, version)
 				return rpcMessage{}, fmt.Errorf("%w: %s to %s", ErrRPCTimeout, method, address)
 			}
 		}
@@ -197,6 +204,7 @@ func (network *Network) receiveLoop() {
 			pending := network.pending[message.RequestID]
 			if pending != nil && pending.address == packet.From &&
 				pending.method == message.Type && message.Sender.ID.Equals(&pending.id) {
+				network.observeContact(message.Sender)
 				select {
 				case pending.response <- message:
 				default: // Ignore duplicate responses.
@@ -247,6 +255,7 @@ func (network *Network) handleRequest(request rpcMessage, from string) {
 	default:
 		return
 	}
+	network.observeContact(request.Sender)
 	data, err := json.Marshal(response)
 	if err == nil {
 		// Replies are best effort; the caller handles loss through retries.
@@ -265,6 +274,7 @@ func (network *Network) shutdown() {
 func (network *Network) Close() {
 	network.shutdown()
 	<-network.stopped
+	<-network.evictionsStopped
 }
 
 func (network *Network) SendFindDataMessage(hash string) {

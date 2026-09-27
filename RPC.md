@@ -1,4 +1,4 @@
-# RPC and node lookup (steps 4–5)
+# RPC, lookup and routing maintenance (steps 4–6)
 
 The node uses `Network` for RPCs. `Network` uses the `Transport` interface,
 implemented by `UDPTransport` and `SimulatedTransport`. Both environments
@@ -85,24 +85,65 @@ If no usable peers are known or none respond, lookup returns
 `ErrNoReachableContacts`. Cancellation and shutdown return their corresponding
 errors without partial results.
 
-Successful probes update the local routing table using its current basic
-insertion policy. Network-wide communication-driven maintenance, eviction,
-refresh and joining are still step 6.
+Matched replies update the local routing table using the maintenance policy
+below. Lookup itself does not directly insert unverified referral contacts.
 
-## Seeding a lookup before joining is implemented
+## Joining and maintenance (step 6)
 
-Given already-running nodes and a parsed target ID:
+The first node starts with `NewKademliaWithTransport` and listens. Other nodes
+join with:
 
 ```go
-if err := node.AddContact(bootstrap.Contact()); err != nil {
+if err := node.Join(ctx, "127.0.0.1:8000"); err != nil {
     return err
 }
-contacts, err := node.LookupContact(ctx, targetID)
 ```
 
-`AddContact` validates the seed but does not check its liveness or join a network.
-The bootstrap node needs appropriate contacts in its own routing table for
-lookup to discover additional nodes.
+Join validates and seeds the bootstrap address, pings it, looks up the joining
+node's own ID, and refreshes every bucket farther away than the closest
+discovered neighbor. This follows the joining procedure in the lab's
+[Kademlia reference](https://xlattice.sourceforge.net/components/protocol/kademlia/specs.html).
+Our bucket 0 is the farthest, so the refresh range is below the closest
+neighbor's bucket index. Empty buckets in that range are refreshed too.
+
+Each refresh performs an ordinary iterative lookup for a random ID in the
+bucket's exact XOR-distance range. The shared prefix is preserved, the bucket's
+first differing bit is flipped, and the remaining bits are random.
+
+Connected nodes run a background refresh pass every `Config.RefreshPeriod`
+(default one hour). A pass refreshes ranges with no lookup attempt during that
+period, including empty ranges. A first node with no peers skips the pass.
+`node.Refresh(ctx)` also permits an explicit pass over stale ranges.
+Joining and refresh are serialized per node; waiting for that gate is
+cancellable. The ticker checks periodically rather than scheduling a separate
+timer for every bucket, so a newly stale bucket is handled on the next pass.
+
+Valid supported requests and matched replies update the sender's routing
+entry. The bucket front is most recently seen and the back is least recently
+seen. Unmatched replies and unknown or malformed requests do not introduce
+contacts. Referral contacts are validated but become routing entries only
+after direct communication with them.
+
+When a new sender's bucket is full, a separate worker pings its least recently
+seen contact. A responding contact is retained. A timeout after all configured
+attempts permits replacement. Only one eviction check per bucket can be
+pending; additional new candidates for that bucket are ignored while it is
+pending. This bounds the queue and avoids conflicting replacement decisions.
+No table lock is held while waiting for a network reply.
+
+Each stored contact has an observation version. A timed-out RPC removes a
+stored contact only if its version has not changed since the call began.
+Likewise, an eviction check cannot remove a peer that communicated again after
+the check was scheduled. Caller cancellation and local send errors do not
+evict peers. An old decision also cannot evict an unrelated replacement.
+
+The low-level `AddContact` API remains useful for manually seeding tests; it
+does not probe or replace a full bucket. Normal communication uses the
+maintenance policy above, and normal network entry uses `Join`.
+
+`Close` interrupts pending RPCs and refresh work and waits for the node's RPC,
+eviction and refresh workers to finish. The periodic worker retries failed
+refresh passes on later ticks; explicit Join/Refresh calls return their errors.
 
 ## Routing-table changes
 
@@ -121,8 +162,12 @@ Run `CGO_ENABLED=1 go test -race -count=1 ./...` with Go and a C compiler.
 Tests cover PING and lookup over simulated and loopback UDP transports,
 1,000-node lookup against a global nearest-contact oracle, multi-hop discovery,
 strict parallel batches, failure fallback, duplicate contacts, termination,
-cancellation, concurrent lookups, and RPC response validation. Routing tables
-are manually seeded in these tests; they do not test joining yet.
+cancellation, concurrent lookups, and RPC response validation. Large lookup
+fixtures are manually seeded; separate tests build a 24-node network through
+ordinary and simultaneous joins without manual table seeding. Joining is also
+tested over real UDP. Maintenance tests cover live/dead peer replacement,
+recent communication during an old timeout, targets in all 256 bucket ranges,
+stale-range selection, automatic refresh and shutdown during a refresh.
 
-FIND_VALUE, STORE, full routing maintenance, joining, periodic tasks, lookup
-event logging, experiments and the CLI remain for their planned steps.
+FIND_VALUE, STORE, periodic value replication, lookup event logging, experiments,
+container deployment and the CLI remain for their planned steps.

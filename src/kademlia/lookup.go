@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"sort"
+	"time"
 )
 
 var ErrNoReachableContacts = errors.New("lookup found no reachable contacts")
@@ -47,7 +48,11 @@ func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID)
 	if kademlia.network == nil {
 		return nil, fmt.Errorf("node has no transport")
 	}
+	if err := kademlia.lookupStopped(ctx); err != nil {
+		return nil, err
+	}
 	targetID := *target
+	kademlia.routingTable.markLookup(&targetID, time.Now())
 	candidates := make(map[KademliaID]*lookupCandidate)
 	add := func(contact Contact) {
 		contact, err := validatedContact(contact)
@@ -119,7 +124,6 @@ func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID)
 				continue
 			}
 			reply.candidate.state = lookupResponded
-			kademlia.routingTable.AddContact(reply.candidate.contact)
 			for _, contact := range reply.contacts {
 				add(contact)
 			}
