@@ -1,9 +1,11 @@
 package kademlia
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Kademlia owns the state of one node. Create it with NewKademlia.
@@ -12,7 +14,7 @@ type Kademlia struct {
 	me           Contact
 	config       Config
 	routingTable *RoutingTable
-	network      Transport // Nil until a transport is supplied.
+	network      *Network // Nil until a transport is supplied.
 
 	dataMu    sync.RWMutex // Protects dataStore when storage is implemented.
 	dataStore map[KademliaID][]byte
@@ -44,7 +46,7 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 	}, nil
 }
 
-// NewKademliaWithTransport initializes a node using an already bound transport.
+// NewKademliaWithTransport initializes a node and starts RPC on a bound transport.
 // Ownership transfers to the node on success: Close will close the transport.
 // On error, the caller still owns the transport and must close it.
 func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, error) {
@@ -55,7 +57,10 @@ func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, er
 	if err != nil {
 		return nil, err
 	}
-	node.network = transport
+	node.network, err = NewNetwork(transport, config)
+	if err != nil {
+		return nil, err
+	}
 	return node, nil
 }
 
@@ -71,7 +76,7 @@ func (kademlia *Kademlia) Close() {
 	kademlia.closeOnce.Do(func() {
 		close(kademlia.done)
 		if kademlia.network != nil {
-			_ = kademlia.network.Close()
+			kademlia.network.Close()
 		}
 	})
 }
@@ -86,4 +91,12 @@ func (kademlia *Kademlia) LookupData(hash string) {
 
 func (kademlia *Kademlia) Store(data []byte) {
 	// TODO
+}
+
+// Ping sends a PING RPC to a peer and returns its elapsed round-trip time.
+func (kademlia *Kademlia) Ping(ctx context.Context, contact *Contact) (time.Duration, error) {
+	if kademlia.network == nil {
+		return 0, fmt.Errorf("node has no transport")
+	}
+	return kademlia.network.SendPingMessage(ctx, contact)
 }

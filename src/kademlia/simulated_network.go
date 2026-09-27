@@ -128,28 +128,7 @@ func (transport *SimulatedTransport) Send(to string, data []byte) error {
 }
 
 func (transport *SimulatedTransport) Receive(ctx context.Context) (Packet, error) {
-	if err := ctx.Err(); err != nil {
-		return Packet{}, err
-	}
-	select {
-	case <-transport.done:
-		return Packet{}, net.ErrClosed
-	default:
-	}
-	select {
-	case <-ctx.Done():
-		return Packet{}, ctx.Err()
-	case <-transport.done:
-		return Packet{}, net.ErrClosed
-	case packet := <-transport.inbox:
-		// Prefer shutdown if a queued packet and Close become ready together.
-		select {
-		case <-transport.done:
-			return Packet{}, net.ErrClosed
-		default:
-			return packet, nil
-		}
-	}
+	return receiveDatagram(ctx, transport.inbox, transport.done)
 }
 
 func (transport *SimulatedTransport) Close() error {

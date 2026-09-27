@@ -271,7 +271,7 @@ func TestNodeTransportOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.Contact().Address != a.LocalAddr() || node.network != a {
+	if node.Contact().Address != a.LocalAddr() || node.network.transport != a {
 		t.Fatal("node did not use supplied transport")
 	}
 	var workers sync.WaitGroup
@@ -286,7 +286,8 @@ func TestNodeTransportOwnership(t *testing.T) {
 }
 
 func TestSimulatedNetwork1000Nodes(t *testing.T) {
-	// This checks transport scale, not full DHT lookups (implemented later).
+	// Each node now has an RPC receiver: exercise PING instead of reading its
+	// transport directly. Full DHT lookup scale is tested in later steps.
 	const count = 1000
 	network := testSimulatedNetwork(t, SimulatedNetworkConfig{Seed: 1})
 	nodes := make([]*Kademlia, count)
@@ -304,20 +305,15 @@ func TestSimulatedNetwork1000Nodes(t *testing.T) {
 		workers.Add(1)
 		go func(i int, node *Kademlia) {
 			defer workers.Done()
-			next := nodes[(i+1)%count]
-			if err := node.network.Send(next.me.Address, []byte(node.me.Address)); err != nil {
-				t.Errorf("send: %v", err)
+			next := nodes[(i+1)%count].Contact()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if _, err := node.Ping(ctx, &next); err != nil {
+				t.Errorf("node %d ping: %v", i, err)
 			}
 		}(i, node)
 	}
 	workers.Wait()
-	for i, node := range nodes {
-		packet := receivePacket(t, node.network)
-		want := nodes[(i+count-1)%count].me.Address
-		if packet.From != want || string(packet.Data) != want {
-			t.Fatalf("node %d received wrong packet: %+v", i, packet)
-		}
-	}
 }
 
 func TestSimulatedConcurrentSendReceiveClose(t *testing.T) {

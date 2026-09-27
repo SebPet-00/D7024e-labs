@@ -3,6 +3,7 @@ package kademlia
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 )
 
@@ -39,4 +40,30 @@ func canonicalAddress(address string) (string, error) {
 		return "", fmt.Errorf("node address must have a concrete unicast IP and a nonzero port without a zone")
 	}
 	return netip.AddrPortFrom(ip, endpoint.Port()).String(), nil
+}
+
+// receiveDatagram gives UDP and simulated transports the same cancellation
+// and shutdown behavior, without closing a channel that senders may use.
+func receiveDatagram(ctx context.Context, inbox <-chan Packet, done <-chan struct{}) (Packet, error) {
+	if err := ctx.Err(); err != nil {
+		return Packet{}, err
+	}
+	select {
+	case <-done:
+		return Packet{}, net.ErrClosed
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return Packet{}, ctx.Err()
+	case <-done:
+		return Packet{}, net.ErrClosed
+	case packet := <-inbox:
+		select {
+		case <-done:
+			return Packet{}, net.ErrClosed
+		default:
+			return packet, nil
+		}
+	}
 }
