@@ -18,7 +18,7 @@ const rpcPing = "PING"
 var ErrRPCTimeout = errors.New("RPC timed out")
 
 // rpcMessage is the shared wire format for requests and responses.
-// Payload is reserved for FIND_NODE, FIND_VALUE and STORE.
+// Payload carries RPC-specific arguments or results.
 type rpcMessage struct {
 	RequestID string          `json:"request_id"`
 	Type      string          `json:"type"`
@@ -37,19 +37,26 @@ type pendingRPC struct {
 // Network implements RPC independently of how packets are delivered.
 // One receiver dispatches requests and matches replies to pending calls.
 type Network struct {
-	transport Transport
-	me        Contact
-	config    Config
-	mu        sync.Mutex
-	pending   map[string]*pendingRPC
-	done      chan struct{}
-	stopped   chan struct{}
-	closeOnce sync.Once
+	routingTable *RoutingTable
+	transport    Transport
+	me           Contact
+	config       Config
+	mu           sync.Mutex
+	pending      map[string]*pendingRPC
+	done         chan struct{}
+	stopped      chan struct{}
+	closeOnce    sync.Once
 }
 
 // NewNetwork takes ownership of transport on success and starts the RPC reader.
 // The caller must not also call Receive on the supplied transport.
 func NewNetwork(transport Transport, config Config) (*Network, error) {
+	return newNetwork(transport, config, nil)
+}
+
+// The table is supplied before the receiver starts, so handlers never race
+// against initialization. Standalone RPC instances get their own empty table.
+func newNetwork(transport Transport, config Config, table *RoutingTable) (*Network, error) {
 	if transport == nil {
 		return nil, fmt.Errorf("transport must not be nil")
 	}
@@ -61,13 +68,17 @@ func NewNetwork(transport Transport, config Config) (*Network, error) {
 		return nil, err
 	}
 	id := KademliaID(sha256.Sum256([]byte(address)))
+	if table == nil {
+		table = newRoutingTable(NewContact(&id, address), config.K)
+	}
 	network := &Network{
-		transport: transport,
-		me:        NewContact(&id, address),
-		config:    config,
-		pending:   make(map[string]*pendingRPC),
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
+		routingTable: table,
+		transport:    transport,
+		me:           NewContact(&id, address),
+		config:       config,
+		pending:      make(map[string]*pendingRPC),
+		done:         make(chan struct{}),
+		stopped:      make(chan struct{}),
 	}
 	go network.receiveLoop()
 	return network, nil
@@ -224,22 +235,22 @@ func decodeRPC(packet Packet) (rpcMessage, bool) {
 }
 
 func (network *Network) handleRequest(request rpcMessage, from string) {
+	response := rpcMessage{RequestID: request.RequestID, Type: request.Type, Response: true, Sender: network.me}
 	switch request.Type {
 	case rpcPing:
-		response := rpcMessage{
-			RequestID: request.RequestID,
-			Type:      rpcPing,
-			Response:  true,
-			Sender:    network.me,
+	case rpcFindNode:
+		payload, err := network.findNodePayload(request.Payload, request.Sender.ID)
+		if err != nil {
+			return
 		}
-		data, err := json.Marshal(response)
-		if err == nil {
-			// Replies are best effort. A lost reply is handled by the caller's
-			// timeout/retry policy; PING is safe to process repeatedly.
-			_ = network.transport.Send(from, data)
-		}
+		response.Payload = payload
 	default:
-		// Other RPC handlers are implemented with their corresponding steps.
+		return
+	}
+	data, err := json.Marshal(response)
+	if err == nil {
+		// Replies are best effort; the caller handles loss through retries.
+		_ = network.transport.Send(from, data)
 	}
 }
 
@@ -254,10 +265,6 @@ func (network *Network) shutdown() {
 func (network *Network) Close() {
 	network.shutdown()
 	<-network.stopped
-}
-
-func (network *Network) SendFindContactMessage(contact *Contact) {
-	// TODO
 }
 
 func (network *Network) SendFindDataMessage(hash string) {

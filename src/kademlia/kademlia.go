@@ -57,7 +57,7 @@ func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, er
 	if err != nil {
 		return nil, err
 	}
-	node.network, err = NewNetwork(transport, config)
+	node.network, err = newNetwork(transport, config, node.routingTable)
 	if err != nil {
 		return nil, err
 	}
@@ -81,10 +81,6 @@ func (kademlia *Kademlia) Close() {
 	})
 }
 
-func (kademlia *Kademlia) LookupContact(target *Contact) {
-	// TODO
-}
-
 func (kademlia *Kademlia) LookupData(hash string) {
 	// TODO
 }
@@ -99,4 +95,15 @@ func (kademlia *Kademlia) Ping(ctx context.Context, contact *Contact) (time.Dura
 		return 0, fmt.Errorf("node has no transport")
 	}
 	return kademlia.network.SendPingMessage(ctx, contact)
+}
+
+// AddContact seeds a known peer locally. It validates identity but does not
+// check liveness or perform the full joining procedure.
+func (kademlia *Kademlia) AddContact(contact Contact) error {
+	contact, err := validatedContact(contact)
+	if err != nil {
+		return err
+	}
+	kademlia.routingTable.AddContact(contact)
+	return nil
 }

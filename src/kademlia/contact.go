@@ -1,6 +1,7 @@
 package kademlia
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 )
@@ -18,7 +19,7 @@ func NewContact(id *KademliaID, address string) Contact {
 	return Contact{id, address, nil}
 }
 
-// CalcDistance calculates the distance to the target and 
+// CalcDistance calculates the distance to the target and
 // fills the contacts distance field
 func (contact *Contact) CalcDistance(target *KademliaID) {
 	contact.distance = contact.ID.CalcDistance(target)
@@ -66,8 +67,37 @@ func (candidates *ContactCandidates) Swap(i, j int) {
 	candidates.contacts[i], candidates.contacts[j] = candidates.contacts[j], candidates.contacts[i]
 }
 
-// Less returns true if the Contact at index i is smaller than 
+// Less returns true if the Contact at index i is smaller than
 // the Contact at index j
 func (candidates *ContactCandidates) Less(i, j int) bool {
 	return candidates.contacts[i].Less(&candidates.contacts[j])
+}
+
+// cloneContact keeps pointer fields from exposing mutable routing-table state.
+func cloneContact(contact Contact) Contact {
+	if contact.ID != nil {
+		id := *contact.ID
+		contact.ID = &id
+	}
+	if contact.distance != nil {
+		distance := *contact.distance
+		contact.distance = &distance
+	}
+	return contact
+}
+
+// validatedContact checks the lab identity rule and returns an owned copy.
+func validatedContact(contact Contact) (Contact, error) {
+	if contact.ID == nil {
+		return Contact{}, fmt.Errorf("contact requires an ID")
+	}
+	address, err := canonicalAddress(contact.Address)
+	if err != nil {
+		return Contact{}, err
+	}
+	id := KademliaID(sha256.Sum256([]byte(address)))
+	if !contact.ID.Equals(&id) {
+		return Contact{}, fmt.Errorf("contact ID does not match its address")
+	}
+	return NewContact(&id, address), nil
 }
