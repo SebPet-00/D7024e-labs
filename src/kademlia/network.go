@@ -37,6 +37,7 @@ type pendingRPC struct {
 // Network implements RPC independently of how packets are delivered.
 // One receiver dispatches requests and matches replies to pending calls.
 type Network struct {
+	dataStore        *valueStore
 	evictions        chan *evictionProbe
 	evictionsStopped chan struct{}
 	routingTable     *RoutingTable
@@ -53,12 +54,12 @@ type Network struct {
 // NewNetwork takes ownership of transport on success and starts the RPC reader.
 // The caller must not also call Receive on the supplied transport.
 func NewNetwork(transport Transport, config Config) (*Network, error) {
-	return newNetwork(transport, config, nil)
+	return newNetwork(transport, config, nil, nil)
 }
 
-// The table is supplied before the receiver starts, so handlers never race
-// against initialization. Standalone RPC instances get their own empty table.
-func newNetwork(transport Transport, config Config, table *RoutingTable) (*Network, error) {
+// State is supplied before the receiver starts, so handlers never race
+// against initialization. Standalone RPC instances get their own empty state.
+func newNetwork(transport Transport, config Config, table *RoutingTable, store *valueStore) (*Network, error) {
 	if transport == nil {
 		return nil, fmt.Errorf("transport must not be nil")
 	}
@@ -73,7 +74,11 @@ func newNetwork(transport Transport, config Config, table *RoutingTable) (*Netwo
 	if table == nil {
 		table = newRoutingTable(NewContact(&id, address), config.K)
 	}
+	if store == nil {
+		store = newValueStore(config.MaxValueSize)
+	}
 	network := &Network{
+		dataStore:        store,
 		evictions:        make(chan *evictionProbe, IDLength*8),
 		evictionsStopped: make(chan struct{}),
 		routingTable:     table,
@@ -252,6 +257,12 @@ func (network *Network) handleRequest(request rpcMessage, from string) {
 			return
 		}
 		response.Payload = payload
+	case rpcStore:
+		payload, err := network.storePayload(request.Payload)
+		if err != nil {
+			return
+		}
+		response.Payload = payload
 	default:
 		return
 	}
@@ -278,9 +289,5 @@ func (network *Network) Close() {
 }
 
 func (network *Network) SendFindDataMessage(hash string) {
-	// TODO
-}
-
-func (network *Network) SendStoreMessage(data []byte) {
 	// TODO
 }

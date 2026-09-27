@@ -18,8 +18,7 @@ type Kademlia struct {
 	routingTable    *RoutingTable
 	network         *Network // Nil until a transport is supplied.
 
-	dataMu    sync.RWMutex // Protects dataStore when storage is implemented.
-	dataStore map[KademliaID][]byte
+	dataStore *valueStore // Shared with the RPC handler; owns its own lock.
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -45,7 +44,7 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 		me:              me,
 		config:          config,
 		routingTable:    newRoutingTable(me, config.K),
-		dataStore:       make(map[KademliaID][]byte),
+		dataStore:       newValueStore(config.MaxValueSize),
 		done:            make(chan struct{}),
 	}, nil
 }
@@ -61,7 +60,7 @@ func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, er
 	if err != nil {
 		return nil, err
 	}
-	node.network, err = newNetwork(transport, config, node.routingTable)
+	node.network, err = newNetwork(transport, config, node.routingTable, node.dataStore)
 	if err != nil {
 		return nil, err
 	}
@@ -88,10 +87,6 @@ func (kademlia *Kademlia) Close() {
 }
 
 func (kademlia *Kademlia) LookupData(hash string) {
-	// TODO
-}
-
-func (kademlia *Kademlia) Store(data []byte) {
 	// TODO
 }
 

@@ -177,9 +177,12 @@ func TestCloseConcurrentAndIndependent(t *testing.T) {
 		t.Fatal("closing one node shut down another")
 	default:
 	}
-	key := KademliaID{}
-	first.dataStore[key] = []byte("first node")
-	if len(second.dataStore) != 0 {
+	data := []byte("first node")
+	key := KademliaID(sha256.Sum256(data))
+	if err := first.dataStore.put(key, data); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := second.dataStore.get(key); found {
 		t.Fatal("nodes share a data store")
 	}
 }

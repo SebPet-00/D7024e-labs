@@ -49,6 +49,8 @@ func (config Config) validate() error {
 		return fmt.Errorf("refresh period must be positive")
 	case config.MaxValueSize < 255:
 		return fmt.Errorf("maximum value size must be at least 255 bytes")
+	case config.MaxValueSize > MaxSupportedValueSize:
+		return fmt.Errorf("maximum value size must not exceed %d bytes for UDP", MaxSupportedValueSize)
 	}
 	return nil
 }

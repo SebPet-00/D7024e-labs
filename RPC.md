@@ -1,4 +1,4 @@
-# RPC, lookup and routing maintenance (steps 4–6)
+# RPC, lookup, routing maintenance and storage (steps 4–7)
 
 The node uses `Network` for RPCs. `Network` uses the `Transport` interface,
 implemented by `UDPTransport` and `SimulatedTransport`. Both environments
@@ -169,5 +169,31 @@ tested over real UDP. Maintenance tests cover live/dead peer replacement,
 recent communication during an old timeout, targets in all 256 bucket ranges,
 stale-range selection, automatic refresh and shutdown during a refresh.
 
-FIND_VALUE, STORE, periodic value replication, lookup event logging, experiments,
+FIND_VALUE, periodic value replication, lookup event logging, experiments,
 container deployment and the CLI remain for their planned steps.
+
+## STORE and local storage (step 7)
+
+Call `key, err := node.Store(ctx, data)` on a node with a transport. The key is
+SHA-256 of the exact value bytes. STORE first runs iterative node lookup, adds
+the publishing node to the candidates, and chooses up to K closest nodes by
+XOR distance. Writes run in batches of at most Alpha. The publisher keeps a
+copy only if selected; an isolated listening node stores locally.
+
+A nil error means every selected target acknowledged, which can be fewer than
+K in a small network. On partial failure, Store returns the key and an error
+with the acknowledgment count. Completed writes are not rolled back. A lost
+reply may mean a value was stored even though the caller received an error.
+
+The STORE request payload contains a hexadecimal `key` and base64 `data`.
+Each receiver checks the size and SHA-256 hash before saving a copy. Its reply
+contains the key and `stored: true`, or `stored: false` with `hash_mismatch`
+or `value_too_large`. Malformed requests are ignored. Empty data is encoded
+as an empty base64 string; missing or null data is rejected. Retrying a STORE
+is safe because writing the same key and value is idempotent.
+
+The default value limit is 1024 bytes. Config permits 255 through 32768 bytes,
+leaving room for base64 encoding and the RPC envelope within one UDP datagram.
+The in-memory store uses a read/write lock and copies values on both write and
+read. Values have no expiration and disappear when the process exits.
+Retrieval and periodic replication are not implemented in this step.
