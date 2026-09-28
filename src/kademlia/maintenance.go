@@ -78,7 +78,7 @@ func (kademlia *Kademlia) refreshBucket(ctx context.Context, index int) error {
 	return err
 }
 
-// Serialize joining and refresh, but allow cancellation while waiting.
+// Serialize joining, refresh and replication; allow cancellation while waiting.
 func (kademlia *Kademlia) acquireMaintenance(ctx context.Context) error {
 	if kademlia.network == nil {
 		return fmt.Errorf("node has no transport")

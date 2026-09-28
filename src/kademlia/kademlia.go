@@ -11,12 +11,13 @@ import (
 // Kademlia owns the state of one node. Create it with NewKademlia.
 // A Kademlia must not be copied after use.
 type Kademlia struct {
-	maintenanceGate chan struct{}
-	refreshStopped  chan struct{}
-	me              Contact
-	config          Config
-	routingTable    *RoutingTable
-	network         *Network // Nil until a transport is supplied.
+	maintenanceGate    chan struct{}
+	refreshStopped     chan struct{}
+	replicationStopped chan struct{}
+	me                 Contact
+	config             Config
+	routingTable       *RoutingTable
+	network            *Network // Nil until a transport is supplied.
 
 	dataStore *valueStore // Shared with the RPC handler; owns its own lock.
 
@@ -39,17 +40,18 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 	me := NewContact(&id, address)
 
 	return &Kademlia{
-		maintenanceGate: make(chan struct{}, 1),
-		refreshStopped:  make(chan struct{}),
-		me:              me,
-		config:          config,
-		routingTable:    newRoutingTable(me, config.K),
-		dataStore:       newValueStore(config.MaxValueSize),
-		done:            make(chan struct{}),
+		maintenanceGate:    make(chan struct{}, 1),
+		refreshStopped:     make(chan struct{}),
+		replicationStopped: make(chan struct{}),
+		me:                 me,
+		config:             config,
+		routingTable:       newRoutingTable(me, config.K),
+		dataStore:          newValueStore(config.MaxValueSize),
+		done:               make(chan struct{}),
 	}, nil
 }
 
-// NewKademliaWithTransport starts RPC and periodic refresh on a bound transport.
+// NewKademliaWithTransport starts RPC, periodic refresh and replication on a bound transport.
 // Ownership transfers to the node on success: Close will close the transport.
 // On error, the caller still owns the transport and must close it.
 func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, error) {
@@ -65,6 +67,7 @@ func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, er
 		return nil, err
 	}
 	go node.refreshLoop()
+	go node.replicationLoop()
 	return node, nil
 }
 
@@ -75,13 +78,14 @@ func (kademlia *Kademlia) Contact() Contact {
 }
 
 // Close signals shutdown. It is safe to call more than once or concurrently.
-// It closes the transport and waits for RPC, eviction and refresh workers.
+// It closes the transport and waits for RPC, eviction, refresh and replication workers.
 func (kademlia *Kademlia) Close() {
 	kademlia.closeOnce.Do(func() {
 		close(kademlia.done)
 		if kademlia.network != nil {
 			kademlia.network.Close()
 			<-kademlia.refreshStopped
+			<-kademlia.replicationStopped
 		}
 	})
 }

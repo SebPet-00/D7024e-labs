@@ -1,4 +1,4 @@
-# RPC, lookup, routing maintenance and storage (steps 4–8)
+# RPC, lookup, routing maintenance and storage (steps 4–9)
 
 The node uses `Network` for RPCs. `Network` uses the `Transport` interface,
 implemented by `UDPTransport` and `SimulatedTransport`. Both environments
@@ -169,7 +169,7 @@ tested over real UDP. Maintenance tests cover live/dead peer replacement,
 recent communication during an old timeout, targets in all 256 bucket ranges,
 stale-range selection, automatic refresh and shutdown during a refresh.
 
-Periodic value replication, lookup event logging, experiments,
+Lookup event logging, experiments,
 container deployment and the CLI remain for their planned steps.
 
 ## STORE and local storage (step 7)
@@ -196,7 +196,7 @@ The default value limit is 1024 bytes. Config permits 255 through 32768 bytes,
 leaving room for base64 encoding and the RPC envelope within one UDP datagram.
 The in-memory store uses a read/write lock and copies values on both write and
 read. Values have no expiration and disappear when the process exits.
-Step 8 below adds retrieval; periodic replication remains for a later step.
+Steps 8 and 9 below add retrieval and periodic replication.
 
 ## FIND_VALUE and retrieval (step 8)
 
@@ -222,4 +222,30 @@ If the closest reachable candidates have been exhausted without a value,
 retrieval returns ErrValueNotFound. ErrNoReachableContacts means no candidate
 answered successfully (including an empty routing table); this is not proof
 that the value is absent from the whole network. Cancellation and node closure
-interrupt pending lookups. Periodic replication remains a later step.
+interrupt pending lookups.
+
+## Periodic replication (step 9)
+
+Every listening node starts a replication worker. Its first pass runs after
+Config.ReplicationPeriod (one hour by default). Each pass copies a snapshot of
+all locally stored values, releases the storage lock, and republishes each
+value using the existing iterative lookup and STORE code. Values are processed
+one at a time; each lookup/write retains the existing Alpha concurrency limit.
+
+Call `node.Replicate(ctx)` to run a pass immediately. Replication, joining and
+bucket refresh share the maintenance gate, so their passes cannot overlap.
+User STORE and retrieval operations remain available while maintenance runs.
+A long pass can delay other maintenance; ticker events do not create additional
+workers. Values received during a pass are included in the next snapshot.
+
+Replication checks each snapshot value against its original key. Corrupt
+entries are skipped. Other failures do not prevent remaining values from being
+attempted; explicit Replicate returns the collected errors, and the background
+worker logs failures and tries again on later ticks. Existing copies are never
+deleted, including when a node is no longer among the K closest. This implements
+replication without expiration, as required by Part 1.
+
+Close interrupts pending work and waits for the replication worker. Offline
+nodes do not start it. Replication can repair copies while at least one holder
+survives and can discover peers; it cannot recover data after all copies are
+lost. As with Store, a small network can contain fewer than K copies.

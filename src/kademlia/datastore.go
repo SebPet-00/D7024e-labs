@@ -49,3 +49,15 @@ func (store *valueStore) get(key KademliaID) ([]byte, bool) {
 	value, found := store.values[key]
 	return append([]byte(nil), value...), found
 }
+
+// snapshot copies values under the lock, then releases it before network work.
+// Values arriving during a pass are included in the next pass.
+func (store *valueStore) snapshot() map[KademliaID][]byte {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	result := make(map[KademliaID][]byte, len(store.values))
+	for key, data := range store.values {
+		result[key] = append([]byte(nil), data...)
+	}
+	return result
+}
