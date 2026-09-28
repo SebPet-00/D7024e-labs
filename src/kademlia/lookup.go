@@ -30,6 +30,8 @@ type lookupReply struct {
 	candidate *lookupCandidate
 	contacts  []Contact
 	err       error
+	data      []byte
+	found     bool
 }
 
 // LookupContact returns up to K responsive peers closest to target by XOR
@@ -42,14 +44,23 @@ type lookupReply struct {
 // remaining nearest candidates must still be probed. Keep farther candidates
 // as replacements for failures. The local node is never included in results.
 func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID) ([]Contact, error) {
+	contacts, _, err := kademlia.lookup(ctx, target, false)
+	return contacts, err
+}
+
+// lookup shares shortlist selection, failure handling and parallelism between
+// node and value lookups. Value lookup cancels outstanding probes on success.
+func (kademlia *Kademlia) lookup(ctx context.Context, target *KademliaID, findValue bool) ([]Contact, *ValueResult, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	if target == nil {
-		return nil, fmt.Errorf("lookup requires a target ID")
+		return nil, nil, fmt.Errorf("lookup requires a target ID")
 	}
 	if kademlia.network == nil {
-		return nil, fmt.Errorf("node has no transport")
+		return nil, nil, fmt.Errorf("node has no transport")
 	}
 	if err := kademlia.lookupStopped(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	targetID := *target
 	kademlia.routingTable.markLookup(&targetID, time.Now())
@@ -72,7 +83,7 @@ func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID)
 
 	for {
 		if err := kademlia.lookupStopped(ctx); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		shortlist := make([]*lookupCandidate, 0, len(candidates))
 		for _, candidate := range candidates {
@@ -99,26 +110,40 @@ func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID)
 		}
 		if len(batch) == 0 {
 			if len(shortlist) == 0 {
-				return nil, ErrNoReachableContacts
+				return nil, nil, ErrNoReachableContacts
 			}
 			result := make([]Contact, 0, len(shortlist))
 			for _, candidate := range shortlist {
 				result = append(result, cloneContact(candidate.contact))
 			}
-			return result, nil
+			if findValue {
+				return nil, nil, ErrValueNotFound
+			}
+			return result, nil, nil
 		}
 
 		replies := make(chan lookupReply, len(batch))
 		for _, candidate := range batch {
 			go func(candidate *lookupCandidate) {
-				contacts, err := kademlia.network.SendFindContactMessage(ctx, &candidate.contact, &targetID)
-				replies <- lookupReply{candidate, contacts, err}
+				var reply lookupReply
+				reply.candidate = candidate
+				if findValue {
+					reply.data, reply.contacts, reply.found, reply.err = kademlia.network.SendFindDataMessage(ctx, &candidate.contact, &targetID)
+				} else {
+					reply.contacts, reply.err = kademlia.network.SendFindContactMessage(ctx, &candidate.contact, &targetID)
+				}
+				replies <- reply
 			}(candidate)
 		}
 		// Draining the batch also joins all lookup workers before returning.
 		// Context cancellation and node closure interrupt each RPC.
+		var value *ValueResult
 		for range batch {
 			reply := <-replies
+			if reply.err == nil && reply.found && value == nil {
+				value = &ValueResult{Data: reply.data, Source: cloneContact(reply.candidate.contact)}
+				cancel()
+			}
 			if reply.err != nil {
 				reply.candidate.state = lookupFailed
 				continue
@@ -127,6 +152,9 @@ func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID)
 			for _, contact := range reply.contacts {
 				add(contact)
 			}
+		}
+		if value != nil {
+			return nil, value, nil
 		}
 	}
 }

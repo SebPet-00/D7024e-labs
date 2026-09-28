@@ -86,10 +86,6 @@ func (kademlia *Kademlia) Close() {
 	})
 }
 
-func (kademlia *Kademlia) LookupData(hash string) {
-	// TODO
-}
-
 // Ping sends a PING RPC to a peer and returns its elapsed round-trip time.
 func (kademlia *Kademlia) Ping(ctx context.Context, contact *Contact) (time.Duration, error) {
 	if kademlia.network == nil {

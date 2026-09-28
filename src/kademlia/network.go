@@ -257,6 +257,12 @@ func (network *Network) handleRequest(request rpcMessage, from string) {
 			return
 		}
 		response.Payload = payload
+	case rpcFindValue:
+		payload, err := network.findValuePayload(request.Payload, request.Sender.ID)
+		if err != nil {
+			return
+		}
+		response.Payload = payload
 	case rpcStore:
 		payload, err := network.storePayload(request.Payload)
 		if err != nil {
@@ -286,8 +292,4 @@ func (network *Network) Close() {
 	network.shutdown()
 	<-network.stopped
 	<-network.evictionsStopped
-}
-
-func (network *Network) SendFindDataMessage(hash string) {
-	// TODO
 }

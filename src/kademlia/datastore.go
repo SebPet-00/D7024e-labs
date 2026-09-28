@@ -42,7 +42,7 @@ func (store *valueStore) put(key KademliaID, data []byte) error {
 }
 
 // get distinguishes a stored empty value from a missing key and returns a copy.
-// Distributed retrieval is implemented separately in the next step.
+// Distributed retrieval uses this helper before querying peers.
 func (store *valueStore) get(key KademliaID) ([]byte, bool) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()

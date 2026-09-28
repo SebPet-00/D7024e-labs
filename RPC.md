@@ -1,4 +1,4 @@
-# RPC, lookup, routing maintenance and storage (steps 4–7)
+# RPC, lookup, routing maintenance and storage (steps 4–8)
 
 The node uses `Network` for RPCs. `Network` uses the `Transport` interface,
 implemented by `UDPTransport` and `SimulatedTransport`. Both environments
@@ -169,7 +169,7 @@ tested over real UDP. Maintenance tests cover live/dead peer replacement,
 recent communication during an old timeout, targets in all 256 bucket ranges,
 stale-range selection, automatic refresh and shutdown during a refresh.
 
-FIND_VALUE, periodic value replication, lookup event logging, experiments,
+Periodic value replication, lookup event logging, experiments,
 container deployment and the CLI remain for their planned steps.
 
 ## STORE and local storage (step 7)
@@ -196,4 +196,30 @@ The default value limit is 1024 bytes. Config permits 255 through 32768 bytes,
 leaving room for base64 encoding and the RPC envelope within one UDP datagram.
 The in-memory store uses a read/write lock and copies values on both write and
 read. Values have no expiration and disappear when the process exits.
-Retrieval and periodic replication are not implemented in this step.
+Step 8 below adds retrieval; periodic replication remains for a later step.
+
+## FIND_VALUE and retrieval (step 8)
+
+Call `result, err := node.LookupData(ctx, key.String())`. On success,
+`result.Data` contains the verified bytes and `result.Source` identifies the
+node that supplied them (the local node for a local hit). An empty value is a
+successful result, not a missing key. Returned data and contacts are copies.
+
+Retrieval checks local storage first. On a miss, it uses the same iterative
+shortlist algorithm as node lookup, sending FIND_VALUE instead of FIND_NODE.
+The request payload is `{"target":"<64-digit key>"}`. A reply contains either
+`{"found":true,"data":"<base64>","contacts":null}` or
+`{"found":false,"data":null,"contacts":[...]}`. The latter supplies up to K
+nearest known contacts, excluding the requester.
+
+The client validates response structure, value size and SHA-256 before accepting
+data. Hash mismatches are discarded and logged with the key and peer address;
+lookup continues through other candidates. Local values are also hash-checked.
+The first verified value cancels outstanding probes, and lookup drains its
+workers before returning. No downloaded values or lookup-path copies are cached.
+
+If the closest reachable candidates have been exhausted without a value,
+retrieval returns ErrValueNotFound. ErrNoReachableContacts means no candidate
+answered successfully (including an empty routing table); this is not proof
+that the value is absent from the whole network. Cancellation and node closure
+interrupt pending lookups. Periodic replication remains a later step.
