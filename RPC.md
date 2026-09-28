@@ -1,4 +1,4 @@
-# RPC, lookup, routing maintenance and storage (steps 4–9)
+# RPC, lookup, routing maintenance and storage (steps 4–10)
 
 The node uses `Network` for RPCs. `Network` uses the `Transport` interface,
 implemented by `UDPTransport` and `SimulatedTransport`. Both environments
@@ -169,8 +169,7 @@ tested over real UDP. Maintenance tests cover live/dead peer replacement,
 recent communication during an old timeout, targets in all 256 bucket ranges,
 stale-range selection, automatic refresh and shutdown during a refresh.
 
-Lookup event logging, experiments,
-container deployment and the CLI remain for their planned steps.
+Lookup event logging and experiments remain for their planned steps.
 
 ## STORE and local storage (step 7)
 
@@ -249,3 +248,7 @@ Close interrupts pending work and waits for the replication worker. Offline
 nodes do not start it. Replication can repair copies while at least one holder
 survives and can discover peers; it cannot recover data after all copies are
 lost. As with Store, a small network can contain fewer than K copies.
+
+## CLI and deployment (step 10)
+
+See [RUNNING.md](RUNNING.md) for startup flags, shell commands, the 50-node Compose deployment and the container smoke test.
