@@ -16,18 +16,54 @@ import (
 const shellHelp = "Commands: ping IP:PORT | put FILENAME | get KEY [FILENAME] | show rt | show ds | exit"
 
 func runShell(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, timeout time.Duration, input io.Reader, output io.Writer) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Only the input reader runs independently. The foreground command remains
+	// here, so cancellation drains its RPCs/log events before run closes the file.
+	type inputLine struct {
+		text string
+		err  error
+	}
+	lines := make(chan inputLine)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(input)
+		scanner.Buffer(make([]byte, 4096), 64*1024)
+		for scanner.Scan() {
+			select {
+			case lines <- inputLine{text: scanner.Text()}:
+			case <-ctx.Done():
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			select {
+			case lines <- inputLine{err: err}:
+			case <-ctx.Done():
+			}
+		}
+		// A terminal read itself may block; process exit releases stdin.
+	}()
 	fmt.Fprintln(output, shellHelp)
-	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 4096), 64*1024)
 	for {
 		fmt.Fprint(output, "> ")
-		if !scanner.Scan() {
-			break
+		var item inputLine
+		select {
+		case <-ctx.Done():
+			return nil
+		case next, ok := <-lines:
+			if !ok {
+				return nil
+			}
+			item = next
 		}
 		if ctx.Err() != nil {
 			return nil
 		}
-		line := strings.TrimSpace(scanner.Text())
+		if item.err != nil {
+			return item.err
+		}
+		line := strings.TrimSpace(item.text)
 		if line == "" {
 			continue
 		}
@@ -41,10 +77,6 @@ func runShell(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, ti
 			return nil
 		}
 	}
-	if ctx.Err() != nil {
-		return nil
-	}
-	return scanner.Err()
 }
 
 // Filenames occupy the remainder of the command, so spaces need no escaping.

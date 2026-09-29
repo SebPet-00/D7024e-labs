@@ -20,7 +20,9 @@ type ValueResult struct {
 
 // LookupData checks local storage before iteratively querying peers. A successful
 // empty value has a non-nil result and nil error. Results are not cached.
-func (kademlia *Kademlia) LookupData(ctx context.Context, hash string) (*ValueResult, error) {
+func (kademlia *Kademlia) LookupData(ctx context.Context, hash string) (result *ValueResult, err error) {
+	ctx, trace := kademlia.startLookup(ctx, rpcFindValue, hash)
+	defer func() { trace.finish(err) }()
 	key, err := NewKademliaID(hash)
 	if err != nil {
 		return nil, err
@@ -43,6 +45,6 @@ func (kademlia *Kademlia) LookupData(ctx context.Context, hash string) (*ValueRe
 	if kademlia.network == nil {
 		return nil, fmt.Errorf("node has no transport")
 	}
-	_, result, err := kademlia.lookup(ctx, key, true)
+	_, result, err = kademlia.lookup(ctx, key, true)
 	return result, err
 }

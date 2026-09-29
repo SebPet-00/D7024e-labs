@@ -125,4 +125,37 @@ go vet ./...
 
 Go tests cover shell commands, binary files, filenames with spaces, error paths,
 startup/join/shutdown, and independent inspection snapshots.
-Lookup instrumentation and experiments remain separate planned steps.
+Step 11 below adds lookup instrumentation and reproducible experiments.
+
+## Lookup logs and experiments (step 11)
+
+Create a new structured JSONL log while running the shell:
+
+```sh
+go run . -listen 127.0.0.1:8000 -lookup-log lookups.jsonl
+```
+
+A repeated invocation must use a new filename; existing logs are never overwritten.
+Probes count logical peer RPCs; attempts include retransmissions. Local hits
+have zero probes. Field definitions and failure behavior are in RPC.md.
+
+Run the default five-seed experiment matrix into a new directory, then analyze it:
+
+```sh
+go run ./cmd/experiments -out results/repeat
+python3 -m venv .venv-analysis
+.venv-analysis/bin/pip install -r scripts/requirements-analysis.txt
+.venv-analysis/bin/python scripts/analyze_experiments.py results/repeat --out results/repeat-analysis
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
+Default sizes, loss probabilities and seeds are in experiments.DefaultSettings.
+The command exposes query count, RPC timeout and lookup deadline. Refusing to
+overwrite raw files prevents accidentally mixing a rerun with earlier data.
+An interrupted run leaves partial evidence; choose a fresh output directory
+for a rerun. The analyzer rejects incomplete runs rather than treating them as
+successful samples.
+
+REPORT.md explains the methodology, measured results, limitations and remaining
+report cover-page information. Raw results are in results/part1; CSV summaries,
+Markdown tables and PNG/SVG/PDF figures are in results/analysis.

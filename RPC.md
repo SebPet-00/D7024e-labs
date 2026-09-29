@@ -1,4 +1,4 @@
-# RPC, lookup, routing maintenance and storage (steps 4–10)
+# RPC, lookup, routing maintenance and storage (steps 4–11)
 
 The node uses `Network` for RPCs. `Network` uses the `Transport` interface,
 implemented by `UDPTransport` and `SimulatedTransport`. Both environments
@@ -169,7 +169,7 @@ tested over real UDP. Maintenance tests cover live/dead peer replacement,
 recent communication during an old timeout, targets in all 256 bucket ranges,
 stale-range selection, automatic refresh and shutdown during a refresh.
 
-Lookup event logging and experiments remain for their planned steps.
+Lookup event logging and experiments are documented in step 11 below.
 
 ## STORE and local storage (step 7)
 
@@ -252,3 +252,38 @@ lost. As with Store, a small network can contain fewer than K copies.
 ## CLI and deployment (step 10)
 
 See [RUNNING.md](RUNNING.md) for startup flags, shell commands, the 50-node Compose deployment and the container smoke test.
+
+## Structured lookup events (step 11)
+
+Set Config.LookupLogger to NewLookupLogger(writer), or start the CLI with
+`-lookup-log lookups.jsonl`. The CLI creates a new file and refuses to overwrite
+an existing one. Logging is opt-in; the experiment runner enables it for every
+measured lookup and disables it during setup. Logger.Err exposes write failures;
+they do not change lookup behavior. The CLI reports them and experiments abort.
+
+Records use event = lookup_start, probe, or lookup_end. Each has lookup_id, node,
+kind (FIND_NODE/FIND_VALUE), target and UTC time. A lookup ID combines the local
+address and a process-wide sequence number. It is unique within a process/run;
+when combining logs from different launches, keep each run's identity as well.
+
+A probe event is emitted immediately before an attempted FIND_NODE/FIND_VALUE
+transport send. peer, request_id and attempt identify its destination and retry.
+attempt starts at 1. One logical probe is one RPC request ID; retries reuse it.
+The final event reports success, an error when applicable, probes (distinct
+RPCs), attempts (including retries), rounds (parallel batches), and elapsed_ns.
+A send that fails locally still counts as an attempted transmission. Replies,
+PING eviction traffic, STORE traffic and incoming requests are not lookup probes.
+
+A local value hit emits start/end with zero probes and rounds. Invalid inputs,
+cancellation, not-found results and offline nodes also produce a final failure.
+Successful value lookups cancel and drain outstanding probes before their end
+event. A successful node-lookup API result means its discovered shortlist was
+exhausted; experiments separately check it against the global nearest-node oracle.
+
+Logger writes are mutex-protected and synchronous. Probe counters are atomic
+because RPC workers run in parallel. No routing/storage lock is held while
+writing logs or making network calls. Timing fields include logging overhead;
+the experiments therefore measure counts and correctness, not latency.
+
+See REPORT.md, experiments/runner.go, scripts/analyze_experiments.py and
+results/analysis for the workloads, raw-data validation, figures and statistics.

@@ -148,6 +148,9 @@ func (network *Network) call(ctx context.Context, contact *Contact, method strin
 			return rpcMessage{}, net.ErrClosed
 		default:
 		}
+		if method == rpcFindNode || method == rpcFindValue {
+			lookupTraceFrom(ctx).probe(address, requestID, attempt+1)
+		}
 		if err := network.transport.Send(address, data); err != nil {
 			return rpcMessage{}, err
 		}

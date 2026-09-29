@@ -147,3 +147,15 @@ func (transport *SimulatedTransport) Close() error {
 	clear(transport.timers)
 	return nil
 }
+
+// SetPacketLoss changes loss for subsequent sends. Already scheduled packets
+// keep their delivery decisions. Experiments call this between workload phases.
+func (network *SimulatedNetwork) SetPacketLoss(loss float64) error {
+	if math.IsNaN(loss) || loss < 0 || loss > 1 {
+		return fmt.Errorf("packet loss must be between zero and one")
+	}
+	network.mu.Lock()
+	defer network.mu.Unlock()
+	network.config.PacketLoss = loss
+	return nil
+}

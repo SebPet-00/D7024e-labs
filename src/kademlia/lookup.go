@@ -43,8 +43,14 @@ type lookupReply struct {
 // replied. A round without a closer discovery is not enough to stop: the
 // remaining nearest candidates must still be probed. Keep farther candidates
 // as replacements for failures. The local node is never included in results.
-func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID) ([]Contact, error) {
-	contacts, _, err := kademlia.lookup(ctx, target, false)
+func (kademlia *Kademlia) LookupContact(ctx context.Context, target *KademliaID) (contacts []Contact, err error) {
+	targetText := ""
+	if target != nil {
+		targetText = target.String()
+	}
+	ctx, trace := kademlia.startLookup(ctx, rpcFindNode, targetText)
+	defer func() { trace.finish(err) }()
+	contacts, _, err = kademlia.lookup(ctx, target, false)
 	return contacts, err
 }
 
@@ -122,6 +128,9 @@ func (kademlia *Kademlia) lookup(ctx context.Context, target *KademliaID, findVa
 			return result, nil, nil
 		}
 
+		if trace := lookupTraceFrom(ctx); trace != nil {
+			trace.rounds.Add(1)
+		}
 		replies := make(chan lookupReply, len(batch))
 		for _, candidate := range batch {
 			go func(candidate *lookupCandidate) {

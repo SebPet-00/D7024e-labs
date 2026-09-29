@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -196,5 +197,101 @@ func TestInteractiveStartupCancellationWithoutInput(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("shutdown waited for keyboard input")
+	}
+}
+
+func TestLookupLogCLI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lookup.jsonl")
+	var output bytes.Buffer
+	args := []string{"-listen", "127.0.0.1:0", "-lookup-log", path}
+	if err := run(context.Background(), args, strings.NewReader("get bad\nexit\n"), &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte("lookup_start")) || !bytes.Contains(data, []byte("lookup_end")) || !bytes.Contains(data, []byte(`"success":false`)) {
+		t.Fatal("missing structured lookup failure")
+	}
+	if err := run(context.Background(), args, strings.NewReader("exit\n"), io.Discard, io.Discard); err == nil {
+		t.Fatal("existing log was overwritten")
+	}
+}
+
+type dropValueReplies struct {
+	kademlia.Transport
+	sent chan struct{}
+}
+
+func (transport *dropValueReplies) Send(to string, data []byte) error {
+	var message struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(data, &message) == nil && message.Type == "FIND_VALUE" {
+		select {
+		case transport.sent <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	return transport.Transport.Send(to, data)
+}
+
+func TestShutdownLogsActiveLookupBeforeClosingFile(t *testing.T) {
+	udp, err := kademlia.Listen("127.0.0.1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &dropValueReplies{Transport: udp, sent: make(chan struct{}, 1)}
+	bootstrap, err := kademlia.NewKademliaWithTransport(transport, kademlia.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bootstrap.Close()
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	var diagnostics bytes.Buffer
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("missing")))
+	go func() {
+		done <- run(ctx, []string{"-listen", "127.0.0.1:0", "-bootstrap", bootstrap.Contact().Address,
+			"-lookup-log", path, "-rpc-timeout", "1h", "-command-timeout", "1h"},
+			strings.NewReader("get "+hash+"\n"), io.Discard, &diagnostics)
+	}()
+	select {
+	case <-transport.sent:
+	case <-time.After(3 * time.Second):
+		t.Fatal("value lookup did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown blocked")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var event kademlia.LookupEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Kind == "FIND_VALUE" && event.Event == "lookup_end" {
+			found = true
+			if event.Success == nil || *event.Success || !strings.Contains(event.Error, "context canceled") {
+				t.Fatal("missing cancellation outcome")
+			}
+		}
+	}
+	if !found || diagnostics.Len() != 0 {
+		t.Fatalf("lost final event or logging error: %s", diagnostics.String())
 	}
 }

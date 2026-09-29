@@ -31,6 +31,7 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 	flags.SetOutput(diagnostics)
 	listen := flags.String("listen", "127.0.0.1:8000", "concrete IP:port, or auto:port to select a non-loopback IPv4 address")
 	bootstrap := flags.String("bootstrap", "", "optional bootstrap IP:port or hostname:port")
+	eventLog := flags.String("lookup-log", "", "write structured lookup events to a new JSONL file")
 	headless := flags.Bool("headless", false, "serve until interrupted without reading stdin")
 	timeout := flags.Duration("command-timeout", 30*time.Second, "deadline for joining and each shell command")
 	flags.IntVar(&config.K, "k", config.K, "closest-node count")
@@ -66,6 +67,19 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 	if err != nil {
 		return fmt.Errorf("invalid listen port: %w", err)
 	}
+	if *eventLog != "" {
+		file, err := os.OpenFile(*eventLog, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return fmt.Errorf("lookup log: %w", err)
+		}
+		defer file.Close()
+		config.LookupLogger = kademlia.NewLookupLogger(file)
+		defer func() {
+			if err := config.LookupLogger.Err(); err != nil {
+				fmt.Fprintf(diagnostics, "lookup log error: %v\n", err)
+			}
+		}()
+	}
 	transport, err := kademlia.Listen(ip, port)
 	if err != nil {
 		return err
@@ -93,18 +107,7 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 		<-ctx.Done()
 		return nil
 	}
-	// A terminal read may remain blocked after Close on some platforms. Let
-	// cancellation stop the node independently; process exit releases stdin.
-	shellDone := make(chan error, 1)
-	go func() {
-		shellDone <- runShell(ctx, node, config.MaxValueSize, *timeout, input, output)
-	}()
-	select {
-	case err := <-shellDone:
-		return err
-	case <-ctx.Done():
-		return nil
-	}
+	return runShell(ctx, node, config.MaxValueSize, *timeout, input, output)
 }
 
 func localIPv4() (string, error) {
