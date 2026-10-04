@@ -66,9 +66,10 @@ and selects up to K closest targets. It acknowledges success only when every
 selected target has acknowledged; a small network can have fewer than K targets.
 A partial failure returns the key and an error without rolling back successful
 writes. Replication reuses this path and retains old copies, even if their holder
-is no longer among the closest nodes. New closer peers receive copies on a later
-replication pass; immediate value transfer on discovering a new peer is not
-implemented.
+is no longer among the closest nodes. Newly observed responsible peers receive relevant copies through a bounded
+background STORE worker. The closest known existing holder sends each copy;
+periodic replication repairs failed transfers and incomplete routing knowledge.
+Transfers are asynchronous and retain existing copies.
 
 Joining pings a bootstrap, looks up the joining node's ID, and refreshes the
 farther bucket ranges, including empty ranges. Full buckets retain responsive
@@ -185,7 +186,7 @@ assumption explicit. Our strict Alpha batching and final verification of K
 candidates add constant work; total probes are not the same as sequential hops.
 The plotted log2(N) line is anchored at the first measured mean as a visual
 comparison, not a fitted law or a claimed exact bound.
-[Maymounkov and Mazieres, Kademlia, sections 2–3](https://www.scs.stanford.edu/~dm/home/papers/kpos.pdf).
+[Maymounkov and Mazieres, Kademlia, sections 2â€“3](https://www.scs.stanford.edu/~dm/home/papers/kpos.pdf).
 
 If request and reply datagrams are independently lost with probability p,
 a single exchange succeeds with probability (1-p)^2. Ignoring delays and
@@ -197,6 +198,10 @@ reduce successful retrieval and increase attempts per logical probe. Total work
 need not increase monotonically when lookups exhaust candidates or hit deadlines.
 
 ## 5. Results
+
+These recorded results predate the joining-time transfer change. The experiment
+matrix has not been rerun for that change; regenerate the data before claiming
+these measurements describe the updated implementation.
 
 All 55 seed/condition runs completed, producing 1,100 measured lookups.
 The external analyzer validated 500 node lookups and 600 value lookups against
@@ -323,9 +328,8 @@ controlled network. JSON contact lists also grow with K and can exceed UDP
 limits for impractically large settings.
 
 Useful future work is controlled churn evaluation, correlated loss, configurable
-latency distributions, deterministic simulation scheduling, immediate transfer
-to newly discovered closer nodes, and more efficient replication. None of these
-is presented as implemented or measured here. Part 2 remains separate.
+latency distributions, deterministic simulation scheduling and more efficient
+replication. None of these is presented as implemented or measured here. Part 2 remains separate.
 
 ## 8. Reproducing the results
 

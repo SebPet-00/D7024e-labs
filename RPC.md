@@ -249,6 +249,31 @@ nodes do not start it. Replication can repair copies while at least one holder
 survives and can discover peers; it cannot recover data after all copies are
 lost. As with Store, a small network can contain fewer than K copies.
 
+## Transfers to newly discovered nodes
+
+A directly communicating peer first enters a bounded background transfer queue,
+independently of routing-bucket admission. Recent observations (up to 4096 peers)
+and pending transfers are deduplicated; repeated traffic does not continually
+republish values. The queue holds at most 256 waiting peers. A full queue never
+blocks the RPC receiver or marks the dropped peer as handled, so subsequent
+traffic can retry admission. Periodic replication remains the fallback.
+
+For each stored value, the worker compares the new peer with known contacts and
+the local node by XOR distance. It transfers the value only if the peer is among
+the K closest known nodes and the local node is the closest known existing
+holder (excluding the new peer), following the sender-selection rule in section
+2.5 of the bundled Kademlia paper. Fixed buckets provide partial knowledge;
+periodic replication performs full lookups to repair missed responsibilities.
+
+Transfers are asynchronous: Join does not wait for every incoming value. The
+worker sends the existing STORE RPC with its usual validation, acknowledgments,
+timeouts and retries, retains the original copy, and logs failures. Storage and
+routing locks are released before network calls. Shutdown interrupts an active
+transfer and waits for the worker. There is one transfer worker per node, so
+joining bursts cannot create unbounded goroutines. Tests cover simulated and UDP
+joins, K=1/K=2, sequential joins, responsibility and sender selection, queue
+bounds/deduplication, failures, and shutdown during an unanswered STORE.
+
 ## CLI and deployment (step 10)
 
 See [RUNNING.md](RUNNING.md) for startup flags, shell commands, the 50-node Compose deployment and the container smoke test.
