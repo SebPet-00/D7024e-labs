@@ -37,6 +37,7 @@ type pendingRPC struct {
 // Network implements RPC independently of how packets are delivered.
 // One receiver dispatches requests and matches replies to pending calls.
 type Network struct {
+	handoffs         *handoffQueue
 	dataStore        *valueStore
 	evictions        chan *evictionProbe
 	evictionsStopped chan struct{}
@@ -78,6 +79,7 @@ func newNetwork(transport Transport, config Config, table *RoutingTable, store *
 		store = newValueStore(config.MaxValueSize)
 	}
 	network := &Network{
+		handoffs:         newHandoffQueue(),
 		dataStore:        store,
 		evictions:        make(chan *evictionProbe, IDLength*8),
 		evictionsStopped: make(chan struct{}),
@@ -90,6 +92,7 @@ func newNetwork(transport Transport, config Config, table *RoutingTable, store *
 		stopped:          make(chan struct{}),
 	}
 	go network.evictionLoop()
+	go network.handoffLoop()
 	go network.receiveLoop()
 	return network, nil
 }
@@ -295,4 +298,5 @@ func (network *Network) Close() {
 	network.shutdown()
 	<-network.stopped
 	<-network.evictionsStopped
+	<-network.handoffs.stopped
 }

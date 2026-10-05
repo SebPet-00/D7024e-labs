@@ -123,6 +123,7 @@ func (kademlia *Kademlia) refreshLoop() {
 // observeContact never waits for a network response, so it is safe to call
 // from the RPC receiver. The queue is bounded by one probe per bucket.
 func (network *Network) observeContact(contact Contact) {
+	network.handoffs.observe(contact, network.me.ID)
 	probe := network.routingTable.observe(contact)
 	if probe == nil {
 		return
