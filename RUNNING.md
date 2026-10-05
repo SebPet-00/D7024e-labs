@@ -49,7 +49,7 @@ Run `go run . -help` for all flags.
 ## Docker: 50 nodes
 
 Requires Docker with Compose v2 and Python 3. The script builds the local image,
-starts one bootstrap plus 49 peers in groups of at most ten, and waits until all nodes report successful
+starts one bootstrap plus 49 peers in groups of at most three, and waits until all nodes report successful
 startup and join:
 
 ```sh
@@ -59,18 +59,20 @@ python3 scripts/lab.py up
 Change the total with `--nodes 5`, or isolate another deployment with
 `--project another-lab`. The default Compose project is `kadlab`.
 
-The bootstrap owns a private Docker network namespace and binds port 8000.
-Peers run in separate containers but share that network namespace using Compose
-`network_mode: service:bootstrap`. Each peer uses `-listen auto:0` to obtain a
-different UDP port. All nodes therefore share an IP but have distinct IP:port
-addresses and SHA-256 node IDs. The Ready line prints each actual address.
+Each container has its own IP on the private `kademlia` bridge network.
+Bootstrap listens on port 8000; peers use `auto:0` for an OS-assigned UDP port.
+Stopping bootstrap does not remove the other containers' network interfaces.
 
-This topology was verified with 50 joined nodes. Separate bridge endpoints
-repeatedly produced DNS/UDP timeouts above roughly 30 containers on this Docker
-Desktop/WSL setup; the underlying environment cause was not established.
-Sharing the namespace avoids that observed limitation, but does not test network
-isolation between containers. Node processes, storage and filesystems remain
-separate. This is a single-computer deployment, not a multi-host configuration.
+Startup retries transient join failures individually, with backoff and a default
+limit of three retries per node. Fatal errors are reported rather than hidden.
+Readiness uses logs from the current process start, not historical Ready lines.
+Rerunning up recovers existing peers before growing the lab and refuses to
+silently reduce the node count. Existing peers are not recreated during growth;
+run down then up to apply a changed image or Compose command to every peer.
+Permanent failures still produce an error.
+Use `--batch-size 1 --startup-retries 5` for a more conservative startup.
+Docker Desktop/WSL has previously shown transient UDP join failures during batch
+startup; retries mitigate these without assuming a particular underlying cause.
 
 The script discovers the bootstrap's assigned IP and passes it through
 KAD_BOOTSTRAP. Direct Compose use defaults to bootstrap:8000.
