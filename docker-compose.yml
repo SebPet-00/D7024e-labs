@@ -10,7 +10,8 @@ services:
     image: kadlab:local
     command: ["-listen", "auto:0", "-bootstrap", "${KAD_BOOTSTRAP:-bootstrap:8000}", "-command-timeout", "2m"]
     depends_on: [bootstrap]
-    network_mode: "service:bootstrap"
+    #network_mode: "service:bootstrap"
+    networks: [kademlia]
     stdin_open: true
     tty: true
 networks:
