@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -13,9 +14,9 @@ import (
 	"d7024e/src/kademlia"
 )
 
-const shellHelp = "Commands: ping IP:PORT | put FILENAME | get KEY [FILENAME] | show rt | show ds | exit"
+const shellHelp = "Commands: ping IP:PORT | put FILENAME | get KEY [FILENAME] | show rt | show ds | publish [--force] [--prev=N] DOMAIN:PACKAGE:VERSION FILENAME | install DOMAIN:PACKAGE:VERSION | show DOMAIN:PACKAGE | show dns DOMAIN | exit"
 
-func runShell(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, timeout time.Duration, input io.Reader, output io.Writer) error {
+func runShell(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, timeout time.Duration, input io.Reader, output io.Writer, signing ...map[string]ed25519.PrivateKey) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// Only the input reader runs independently. The foreground command remains
@@ -68,7 +69,7 @@ func runShell(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, ti
 			continue
 		}
 		commandCtx, cancel := context.WithTimeout(ctx, timeout)
-		exit, err := executeCommand(commandCtx, node, maxValueSize, line, output)
+		exit, err := executeCommand(commandCtx, node, maxValueSize, line, output, signing...)
 		cancel()
 		if err != nil {
 			fmt.Fprintf(output, "Error: %v\n", err)
@@ -83,10 +84,16 @@ func runShell(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, ti
 // A surrounding pair of double quotes is also accepted.
 func filename(text string) string { return strings.Trim(strings.TrimSpace(text), "\"") }
 
-func executeCommand(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, line string, output io.Writer) (bool, error) {
+func executeCommand(ctx context.Context, node *kademlia.Kademlia, maxValueSize int, line string, output io.Writer, signing ...map[string]ed25519.PrivateKey) (bool, error) {
 	command, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
 	rest = strings.TrimSpace(rest)
+	var keys map[string]ed25519.PrivateKey
+	if len(signing) > 0 {
+		keys = signing[0]
+	}
 	switch command {
+	case "publish", "install":
+		return false, executeRegistryCommand(ctx, node, maxValueSize, line, output, keys)
 	case "exit":
 		if rest != "" {
 			return false, fmt.Errorf("usage: exit")
@@ -173,6 +180,9 @@ func executeCommand(ctx context.Context, node *kademlia.Kademlia, maxValueSize i
 				}
 			}
 		case "ds":
+			for _, description := range node.Registry().Describe() {
+				fmt.Fprintln(output, description)
+			}
 			entries := node.DataSnapshot()
 			if len(entries) == 0 {
 				fmt.Fprintln(output, "Data store is empty")
@@ -181,7 +191,7 @@ func executeCommand(ctx context.Context, node *kademlia.Kademlia, maxValueSize i
 				fmt.Fprintf(output, "%s %d bytes\n", shortID(entry.Key.String()), entry.Size)
 			}
 		default:
-			return false, fmt.Errorf("usage: show rt | show ds")
+			return false, executeRegistryCommand(ctx, node, maxValueSize, line, output, keys)
 		}
 	default:
 		return false, fmt.Errorf("unknown command %q; type help", command)

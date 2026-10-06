@@ -1,7 +1,7 @@
 FROM golang:1.25.4-alpine AS build
 WORKDIR /build
 COPY go.mod ./
-COPY main.go shell.go ./
+COPY main.go shell.go registry_cli.go ./
 COPY src ./src
 RUN CGO_ENABLED=0 go build -trimpath -o /kadlab .
 

@@ -37,6 +37,9 @@ type pendingRPC struct {
 // Network implements RPC independently of how packets are delivered.
 // One receiver dispatches requests and matches replies to pending calls.
 type Network struct {
+	registry         *Registry
+	registrySlots    chan struct{}
+	registryWorkers  sync.WaitGroup
 	handoffs         *handoffQueue
 	dataStore        *valueStore
 	evictions        chan *evictionProbe
@@ -60,7 +63,7 @@ func NewNetwork(transport Transport, config Config) (*Network, error) {
 
 // State is supplied before the receiver starts, so handlers never race
 // against initialization. Standalone RPC instances get their own empty state.
-func newNetwork(transport Transport, config Config, table *RoutingTable, store *valueStore) (*Network, error) {
+func newNetwork(transport Transport, config Config, table *RoutingTable, store *valueStore, registries ...*Registry) (*Network, error) {
 	if transport == nil {
 		return nil, fmt.Errorf("transport must not be nil")
 	}
@@ -90,6 +93,11 @@ func newNetwork(transport Transport, config Config, table *RoutingTable, store *
 		pending:          make(map[string]*pendingRPC),
 		done:             make(chan struct{}),
 		stopped:          make(chan struct{}),
+	}
+	if len(registries) > 0 {
+		network.registry = registries[0]
+		network.registry.node.network = network
+		network.registrySlots = make(chan struct{}, 16)
 	}
 	go network.evictionLoop()
 	go network.handoffLoop()
@@ -224,7 +232,11 @@ func (network *Network) receiveLoop() {
 			network.mu.Unlock()
 			continue
 		}
-		network.handleRequest(message, packet.From)
+		if message.Type == "REGISTRY_UPDATE" && network.registry != nil {
+			network.dispatchRegistry(message, packet.From)
+		} else {
+			network.handleRequest(message, packet.From)
+		}
 	}
 }
 
@@ -256,6 +268,17 @@ func decodeRPC(packet Packet) (rpcMessage, bool) {
 func (network *Network) handleRequest(request rpcMessage, from string) {
 	response := rpcMessage{RequestID: request.RequestID, Type: request.Type, Response: true, Sender: network.me}
 	switch request.Type {
+	case "REGISTRY_GET", "REGISTRY_UPDATE":
+		if network.registry == nil {
+			return
+		}
+		if request.Type == "REGISTRY_UPDATE" {
+			network.observeContact(request.Sender)
+		}
+		response.Payload = network.registryPayload(request)
+		if response.Payload == nil {
+			return
+		}
 	case rpcPing:
 	case rpcFindNode:
 		payload, err := network.findNodePayload(request.Payload, request.Sender.ID)
@@ -289,6 +312,9 @@ func (network *Network) handleRequest(request rpcMessage, from string) {
 func (network *Network) shutdown() {
 	network.closeOnce.Do(func() {
 		close(network.done)
+		if network.registry != nil {
+			network.registry.cancel()
+		}
 		_ = network.transport.Close()
 	})
 }
@@ -297,6 +323,7 @@ func (network *Network) shutdown() {
 func (network *Network) Close() {
 	network.shutdown()
 	<-network.stopped
+	network.registryWorkers.Wait()
 	<-network.evictionsStopped
 	<-network.handoffs.stopped
 }

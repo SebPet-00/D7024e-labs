@@ -82,6 +82,20 @@ func (network *Network) handoffLoop() {
 // periodic replication performs a full lookup and repairs incomplete knowledge.
 // Snapshot locks are released before sending, and original copies are retained.
 func (network *Network) transferToNewPeer(peer Contact) {
+	defer func() {
+		if network.registry == nil {
+			return
+		}
+		for _, head := range network.registry.snapshot() {
+			key := latestKey(head.Domain, head.Package)
+			contacts := network.routingTable.FindClosestContacts(&key, math.MaxInt)
+			if handoffEligible(network.me, peer, &key, contacts, network.config.K) {
+				if err := network.registry.send(network.registry.ctx, peer, head); err != nil {
+					log.Printf("registry handoff: %v", err)
+				}
+			}
+		}
+	}()
 	for key, data := range network.dataStore.snapshot() {
 		select {
 		case <-network.done:

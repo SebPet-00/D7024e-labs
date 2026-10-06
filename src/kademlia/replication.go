@@ -32,6 +32,11 @@ func (kademlia *Kademlia) Replicate(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("replicate %s: %w", key.String(), err))
 		}
 	}
+	for _, head := range kademlia.registry.snapshot() {
+		if err := kademlia.registry.distribute(ctx, head); err != nil {
+			failures = append(failures, err)
+		}
+	}
 	return errors.Join(failures...)
 }
 

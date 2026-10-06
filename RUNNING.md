@@ -161,3 +161,8 @@ successful samples.
 REPORT.md explains the methodology, measured results, limitations and remaining
 report cover-page information. Raw results are in results/part1; CSV summaries,
 Markdown tables and PNG/SVG/PDF figures are in results/analysis.
+
+## Part 2 package registry
+
+See [PART2.md](PART2.md) for key generation, static DNS ownership configuration,
+publish/install commands, invalid-update demonstrations, and container configuration.
