@@ -312,3 +312,9 @@ the experiments therefore measure counts and correctness, not latency.
 
 See REPORT.md, experiments/runner.go, scripts/analyze_experiments.py and
 results/analysis for the workloads, raw-data validation, figures and statistics.
+
+## Part 2 registry RPCs
+
+REGISTRY_GET and REGISTRY_UPDATE reuse the envelope, correlation, and retry rules
+above. Their payloads, validation, and worker lifecycle are documented in
+[PART2.md](PART2.md). Ordinary STORE/FIND_VALUE remain content-addressed.

@@ -11,6 +11,7 @@ import (
 // Kademlia owns the state of one node. Create it with NewKademlia.
 // A Kademlia must not be copied after use.
 type Kademlia struct {
+	registry           *Registry
 	maintenanceGate    chan struct{}
 	refreshStopped     chan struct{}
 	replicationStopped chan struct{}
@@ -39,7 +40,7 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 	id := KademliaID(sha256.Sum256([]byte(address)))
 	me := NewContact(&id, address)
 
-	return &Kademlia{
+	node := &Kademlia{
 		maintenanceGate:    make(chan struct{}, 1),
 		refreshStopped:     make(chan struct{}),
 		replicationStopped: make(chan struct{}),
@@ -48,7 +49,9 @@ func NewKademlia(address string, config Config) (*Kademlia, error) {
 		routingTable:       newRoutingTable(me, config.K),
 		dataStore:          newValueStore(config.MaxValueSize),
 		done:               make(chan struct{}),
-	}, nil
+	}
+	node.registry = newRegistry(node, config.Owners)
+	return node, nil
 }
 
 // NewKademliaWithTransport starts RPC, periodic refresh and replication on a bound transport.
@@ -62,7 +65,7 @@ func NewKademliaWithTransport(transport Transport, config Config) (*Kademlia, er
 	if err != nil {
 		return nil, err
 	}
-	node.network, err = newNetwork(transport, config, node.routingTable, node.dataStore)
+	_, err = newNetwork(transport, config, node.routingTable, node.dataStore, node.registry)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +85,7 @@ func (kademlia *Kademlia) Contact() Contact {
 func (kademlia *Kademlia) Close() {
 	kademlia.closeOnce.Do(func() {
 		close(kademlia.done)
+		kademlia.registry.cancel()
 		if kademlia.network != nil {
 			kademlia.network.Close()
 			<-kademlia.refreshStopped

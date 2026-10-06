@@ -20,6 +20,18 @@ func TestLookupDataMultihopAndMissing(t *testing.T) {
 	c := testRPCNode(t, testEndpoint(t, sim, "127.0.0.1:9602"), config)
 	seedContact(t, a, b.Contact())
 	seedContact(t, b, c.Contact())
+	// This test isolates lookup caching from the separate new-peer handoff.
+	// Observe peers while stores are empty, then wait for those transfers to finish.
+	for _, holder := range []*Kademlia{a, b, c} {
+		for _, peer := range []*Kademlia{a, b, c} {
+			holder.network.handoffs.observe(peer.Contact(), holder.me.ID)
+		}
+		waitUntil(t, func() bool {
+			holder.network.handoffs.mu.Lock()
+			defer holder.network.handoffs.mu.Unlock()
+			return len(holder.network.handoffs.pending) == 0
+		})
+	}
 	for _, data := range [][]byte{nil, {0, 1, 255, 2}} {
 		key := KademliaID(sha256.Sum256(data))
 		if err := c.dataStore.put(key, data); err != nil {

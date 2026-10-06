@@ -10,6 +10,7 @@ const defaultK = 10
 // Config holds the settings for one node. Pass DefaultConfig() to start
 // with the lab defaults, then change individual fields as needed.
 type Config struct {
+	Owners            Ownership     // Static DNS public keys; copied when constructing a node.
 	LookupLogger      *LookupLogger // Nil disables structured lookup events.
 	K                 int
 	Alpha             int

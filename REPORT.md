@@ -4,7 +4,9 @@ Date: 29 September 2026
 Group number: **TO BE PROVIDED**  
 Group members: **TO BE PROVIDED**  
 Repository: [SebPet-00/D7024e-labs](https://github.com/SebPet-00/D7024e-labs)  
-Scope: Part 1 only. This report describes the implementation through step 11.
+Scope: The Part 1 implementation and evaluation below describe the implementation through step 11.
+The Part 2 architecture, cryptography, ownership verification, validation, thread safety,
+limitations and demonstration are documented in [PART2.md](PART2.md).
 
 ## 1. Purpose and requirements
 
@@ -18,7 +20,7 @@ The implementation supports joining, iterative node/value lookup, storage,
 periodic replication, routing maintenance, a command shell, UDP deployment and
 an in-process simulator. There is deliberately no value expiration. Disk
 persistence, lookup-path caching, generalized bucket splitting, TCP value
-transfers and Part 2 package-registry features are outside this implementation.
+transfers are outside the Part 1 implementation. Part 2 registry support is described separately in [PART2.md](PART2.md).
 These choices and the minimum requirements are based on the local
 [lab specification](Instructions/LAB-SPEC.md).
 

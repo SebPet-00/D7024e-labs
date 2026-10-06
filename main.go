@@ -31,6 +31,8 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 	flags.SetOutput(diagnostics)
 	listen := flags.String("listen", "127.0.0.1:8000", "concrete IP:port, or auto:port to select a non-loopback IPv4 address")
 	bootstrap := flags.String("bootstrap", "", "optional bootstrap IP:port or hostname:port")
+	keyFile := flags.String("registry-keys", "", "JSON static DNS public keys and optional publisher seeds")
+	keygen := flags.String("registry-keygen", "", "generate a registry key configuration for DOMAIN and exit")
 	eventLog := flags.String("lookup-log", "", "write structured lookup events to a new JSONL file")
 	headless := flags.Bool("headless", false, "serve until interrupted without reading stdin")
 	timeout := flags.Duration("command-timeout", 30*time.Second, "deadline for joining and each shell command")
@@ -53,6 +55,14 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 	if *timeout <= 0 {
 		return fmt.Errorf("command-timeout must be positive")
 	}
+	if *keygen != "" {
+		return generateRegistryKeys(*keygen, output)
+	}
+	owners, signingKeys, err := loadRegistryKeys(*keyFile)
+	if err != nil {
+		return err
+	}
+	config.Owners = owners
 	ip, portText, err := net.SplitHostPort(*listen)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
@@ -107,7 +117,7 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 		<-ctx.Done()
 		return nil
 	}
-	return runShell(ctx, node, config.MaxValueSize, *timeout, input, output)
+	return runShell(ctx, node, config.MaxValueSize, *timeout, input, output, signingKeys)
 }
 
 func localIPv4() (string, error) {
