@@ -120,6 +120,7 @@ def figures(summary, output):
                     "--", color="#a06c25", label="log2(N), anchored at first mean")
             ax.set_xscale("log", base=2)
             ax.set_xticks(xs, [str(x) for x in xs])
+            ax.tick_params(axis="x", labelrotation=30)
             ax.set_xlabel("Number of nodes N")
             ax.set_ylabel(label + " per node lookup")
             ax.legend(fontsize=8)
@@ -138,7 +139,9 @@ def figures(summary, output):
         axes[1].legend(fontsize=8)
         for ax in axes:
             ax.set_xlabel("Independent packet-loss probability")
-            ax.set_xticks([row["loss"] for row in loss])
+            # Dense 0.50--0.70 measurements should not create overlapping labels.
+            ax.set_xticks([0, 0.1, 0.3, 0.5, 0.6, 0.7, 0.9])
+            ax.set_xticks([row["loss"] for row in loss], minor=True)
         fig.suptitle("Value lookup reliability: N=100, 3 RPC attempts; bars = SD of seed means")
         for suffix in ["png", "svg", "pdf"]:
             fig.savefig(output / ("loss." + suffix), dpi=180)

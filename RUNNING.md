@@ -141,7 +141,89 @@ A repeated invocation must use a new filename; existing logs are never overwritt
 Probes count logical peer RPCs; attempts include retransmissions. Local hits
 have zero probes. Field definitions and failure behavior are in RPC.md.
 
-Run the default five-seed experiment matrix into a new directory, then analyze it:
+Run both mandatory report experiments and their analysis with one script.
+In WSL, prepare the plotting environment once:
+
+```sh
+python3 -m venv .venv-analysis
+.venv-analysis/bin/python -m pip install -r scripts/requirements-analysis.txt
+```
+
+Then run:
+
+```sh
+.venv-analysis/bin/python scripts/run_experiments.py
+```
+
+The script uses the existing Go workload runner and external Python analyzer.
+It runs an expanded version of the original matrix documented in REPORT.md:
+
+| Experiment | Conditions | Seeds | Lookups per seed/condition |
+| --- | --- | --- | --- |
+| Node lookup scalability | N = 25, 100, 250, 500, 1000, 1500, 2000; loss = 0 | 11, 22, 33, 44, 55 | 20 |
+| Value retrieval reliability | N = 100; loss = 0, 0.1, 0.3, then 0.50 through 0.70 in steps of 0.02, then 0.9 | 11, 22, 33, 44, 55 | 20 |
+
+These are 110 fresh simulated networks and 2,200 measured lookups. K=10,
+alpha=3, two retries, 100 ms per RPC attempt and a two-second lookup deadline
+match the report. Setup joins and stores are loss-free. The analyzer verifies
+logged probe counts and reports averages and sample variance across seed means;
+figure error bars show standard deviation. Scalability figures include an
+anchored log2(N) reference. Docker is not needed for these experiments.
+
+Each invocation creates a fresh `results/report-<UTC timestamp>/` containing
+`raw/*.jsonl`, `analysis/` (CSV data, Markdown tables, PNG/SVG/PDF figures), and
+`manifest.json` (commands, source revision/working-tree status and completion
+status). Existing output directories are refused. Failures stop analysis and
+retain partial evidence; an incomplete manifest must not be treated as a
+finished evaluation. A failed analyzer can leave partial analysis files.
+
+Use `--out results/my-report-run` for a named directory or `--dry-run` to
+preview commands without running anything. `--queries 2` reduces measured
+lookups but still builds every topology; use the default 20 for the report.
+Relative output paths are resolved against the repository, even when invoked
+from another directory. The script checks Go and plotting dependencies before
+starting; it does not install dependencies itself.
+
+For more samples near the onset of observed failures, use:
+
+```sh
+.venv-analysis/bin/python scripts/run_experiments.py --queries 100
+```
+
+This collects 500 lookups per condition (11,000 total). More samples help reveal
+rare failures; the first condition with an observed failure is not a universal
+failure threshold. Queries within each run share evolving routing state, so a
+longer workload also measures more of that evolution. The same five seeds are
+used. Change `experiments.DefaultSettings` to adjust sizes, loss probabilities
+or seeds; the wrapper reads these settings using the Go command's `-describe`
+flag and records them in the manifest. JSON duration fields are nanoseconds.
+
+### Reusing the data for other graphs
+
+No new experiment is needed to plot already recorded measurements:
+
+- `analysis/summary.csv`: one row per condition, with means and sample variances.
+- `analysis/runs.csv`: one row per seed/condition, for comparing seeds.
+- `analysis/lookups.csv`: one row per lookup, for distributions, failures and retries.
+- `raw/*.jsonl`: original events and settings, including elapsed time on
+  `lookup_end` records (not currently exported to the CSVs).
+
+These files can be read with Python, R, Excel or another plotting tool. Use
+`sqrt(variance)` for the current figures' standard-deviation error bars. Keep
+seed-level variation distinct from variation between individual lookups.
+Re-run just the analyzer to regenerate the existing graphs from saved raw data:
+
+```sh
+.venv-analysis/bin/python scripts/analyze_experiments.py results/YOUR-RUN/raw --out results/YOUR-RUN/replotted
+```
+
+The current REPORT.md warns that its measurements predate an implementation
+change. After a successful run, use the new tables and figures to update the
+report's results and discussion; the script preserves the existing report and
+historical data. Optional alpha, churn and replication-factor sweeps from the
+lab specification are not part of the mandatory matrix.
+
+The underlying commands can also be run separately:
 
 ```sh
 go run ./cmd/experiments -out results/repeat
