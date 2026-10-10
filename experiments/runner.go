@@ -27,8 +27,9 @@ type Settings struct {
 }
 
 func DefaultSettings() Settings {
-	return Settings{Output: "results", Sizes: []int{25, 100, 250, 500, 1000}, Losses: []float64{0, 0.1, 0.3, 0.5, 0.7, 0.9},
-		Seeds: []int64{11, 22, 33, 44, 55}, Queries: 20, LossNodes: 100, RPCTimeout: 100 * time.Millisecond, QueryTimeout: 2 * time.Second}
+	return Settings{Output: "results", Sizes: []int{25, 100, 250, 500, 1000, 1500, 2000},
+		Losses: []float64{0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9},
+		Seeds:  []int64{11, 22, 33, 44, 55}, Queries: 20, LossNodes: 100, RPCTimeout: 100 * time.Millisecond, QueryTimeout: 2 * time.Second}
 }
 func Run(settings Settings) error {
 	if settings.Queries < 1 || len(settings.Seeds) == 0 || settings.RPCTimeout <= 0 || settings.QueryTimeout <= 0 {
