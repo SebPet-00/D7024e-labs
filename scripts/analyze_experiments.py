@@ -140,7 +140,7 @@ def figures(summary, output):
         for ax in axes:
             ax.set_xlabel("Independent packet-loss probability")
             # Dense 0.50--0.70 measurements should not create overlapping labels.
-            ax.set_xticks([0, 0.1, 0.3, 0.5, 0.6, 0.7, 0.9])
+            ax.set_xticks([0, 0.1, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9])
             ax.set_xticks([row["loss"] for row in loss], minor=True)
         fig.suptitle("Value lookup reliability: N=100, 3 RPC attempts; bars = SD of seed means")
         for suffix in ["png", "svg", "pdf"]:
@@ -180,3 +180,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
